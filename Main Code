@@ -1,0 +1,233 @@
+import numpy as np
+import pandas as pd
+import time
+import spacy
+from nltk.corpus import stopwords
+import random
+import nltk
+nltk.download('stopwords')
+
+
+#machine learning classifier, classifies the sentence vector to numbers 0-4 (topics)
+from sklearn.ensemble import RandomForestClassifier
+
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
+
+# requirements.txt
+# numpy
+# pandas
+# openpyxl
+# scikit-learn
+# spacy
+# nltk
+
+#console (to be executed in the console)
+# python -m spacy download en_core_web_sm
+#in python (to be executed in the text editor)
+
+
+nlp = spacy.load('en_core_web_sm')
+
+# Don't take the default, e.g. shouldn't ignore the word "people"
+# Also, some rows have no data, should exclude from analysis
+stop_words = set([w.lower() for w in stopwords.words()])
+stop_words.remove('people')
+
+
+global df, wordVecs
+
+#trying to read df throws error
+#df = pd.read_excel(r'C:\\Users\\username\\Downloads\\training02.xlsx')
+
+# Could possibly store efficiently with numpy
+# e.g. 1 file - list of 2M words, other file 2M x 300 array
+
+
+def loadWordVectors():
+    global wordVecs
+    wordVecs = {}
+    with open('C:\\Users\\username\\Downloads\\lexvec.commoncrawl.300d.W.pos.neg3.vectors', encoding="UTF-8") as f:
+        print(f.readline().strip())
+        i = 1
+        t0 = time.time()
+        line = f.readline()
+        while len(line) > 0:
+            line = line.strip()
+            split = line.split(" ")
+            wordVecs[split[0]] = np.array([float(x) for x in split[1:]])
+            if i % 100000 == 0:
+                t1 = time.time()
+                print(i, split[0], t1-t0)
+                t0 = t1
+            line = f.readline()
+            i += 1
+
+    print('word vecs loaded from file')
+
+    return wordVecs
+
+def buildSentenceVectors():
+    global df, wordVecs
+    df = pd.read_excel(r'C:\\Users\\username\\Downloads\\Latest2108.xlsx')
+    print("Data frame loaded")
+  
+
+    # f = open('C:\\Users\\username\\Downloads\\lexvec.commoncrawl.300d.W.pos.neg3.vectors')
+    # 2000000 300
+    # the 0.008314 0.026552 ...
+
+    wordVecs = loadWordVectors()
+    print("Word vectors loaded")
+
+    # TODO: No punctuation e.g. need to map "they're" to "they are"
+    # hyphens being replaced with \x ?
+    # need to remove punctuation e.g. full stop at end of sentences
+
+    df['words'] = df['Data Point'].map(splitSentence)
+    print("Words separated")
+    df['wordVec'] = df['words'].map(sentenceVector)
+    print("Complete!")
+
+    # save/load binary dataframe
+    df.to_pickle('C:\\Users\\username\\Downloads\\trainingWithVecs2')
+    df = pd.read_pickle('C:\\Users\\username\\Downloads\\trainingWithVecs2')
+    return df
+
+
+#function that gets useful words from sentences
+#nlp natural language processing library
+def splitSentence(s):
+    if type(s) != str:
+        return []
+    return list(filter(lambda s : s.isalpha() and s not in stop_words, [token.text for token in nlp(s.lower())]))
+
+# average of those words that appear in the word vector database
+def sentenceVector(words):
+    tot = np.zeros(300) # dimension of vectors
+    count = 0
+    for word in words:
+        if word in wordVecs:
+            tot += wordVecs[word]
+            count += 1
+    if count == 0:
+        print("No words recognised from sentence, check stop list")
+        return tot
+    return tot/count
+
+def loadSentenceVecs():
+    print('Loading word vectors from pre-computed file')
+    return pd.read_pickle('C:\\Users\\username\\Downloads\\trainingWithVecs2')
+
+# buildSentenceVectors for rebuilding vectors, loadSentenceVecs to just reload from a file
+#df = buildSentenceVectors()
+df = loadSentenceVecs()
+
+# analysis functions to investigate better approaches
+def rowsWithoutAnyWords():
+    return df[df['words'].isin([[]])]
+# Encoding the Primary Topic column
+topicMap = {
+    'Demand impact' : 0,
+    'People' : 1,
+    'Policy recommendations' : 2,
+    'Supply impact' : 3,
+    'Other operational impact': 4
+}
+df['label'] = df['Primary Topic'].map(topicMap)
+
+print("Data loaded")
+
+
+# Gives a more reliable score than just using one split (like below with train_test_split)
+def cross_validate(df):
+    kf = StratifiedKFold(n_splits=5, shuffle=True) # idea - also try StratifiedKFold
+    score = 0
+    overfitScore = 0
+    count = 0
+
+    for trainIndices, testIndices in kf.split(df['wordVec'], df['label']):
+        train, test = df.iloc[trainIndices], df.iloc[testIndices]
+        X_train = np.array(train['wordVec'].tolist())
+        X_test = np.array(test['wordVec'].tolist())
+        y_train = train['label']
+        y_test = test['label']
+
+        print('Training model ' + str(count))
+
+
+        # Modify parameters to improve model/avoid overfitting
+        # https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html
+        # min_samples_leaf : int -- recommended for smoothing
+        rf = RandomForestClassifier(n_estimators=100, max_depth=None, min_samples_split=2, min_samples_leaf=1, random_state=1234)
+
+
+        
+        rf_model = rf.fit(X_train, y_train.values)
+        print('Model ' + str(count) + ' fit')
+        score += rf.score(X_test, y_test)
+        overfitScore += rf.score(X_train, y_train)
+        print('Model ' + str(count) + ' scored')
+        count += 1
+
+    print("Score on training data (detect overfitting): " + str(overfitScore/count))
+    return score/count
+
+
+
+
+# kf = KFold splitter, df = data frame
+def do_cross_val(kf, df, n_estimators=100, max_depth=None, min_samples_split=2, min_samples_leaf=1):
+    score = 0
+    overfitScore = 0
+    count = 0
+            
+    for trainIndices, testIndices in kf.split(df['wordVec'], df['label']):
+        train, test = df.iloc[trainIndices], df.iloc[testIndices]
+        X_train = np.array(train['wordVec'].tolist())
+        X_test = np.array(test['wordVec'].tolist())
+        y_train = train['label']
+        y_test = test['label']
+
+
+        # Modify parameters to improve model/avoid overfitting
+        # https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html
+        # min_samples_leaf : int -- recommended for smoothing
+         # rf = RandomForestClassifier(n_estimators=100, max_depth=None, min_samples_split=2, min_samples_leaf=1, random_state=1234)
+        rf = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, min_samples_split=min_samples_split, min_samples_leaf=min_samples_leaf, random_state=1234)
+
+        rf_model = rf.fit(X_train, y_train.values)
+        score += rf.score(X_test, y_test)
+        overfitScore += rf.score(X_train, y_train)
+        count += 1
+    
+    return score/count, overfitScore/count
+
+def trainParameters(df):
+    kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=1234) # idea - also try StratifiedKFold
+
+    min_samples_leaf_values = [1, 2, 4, 8, 16, 32]
+    max_depth = [None, 15, 12, 9, 6]
+    
+    results = []
+    overfitResults = []
+    
+    for leaf_samples in min_samples_leaf_values:
+        leafResults = []
+        overfitLeafResults = []
+        
+        for depth in max_depth:
+            score, overfitScore = do_cross_val(kf, df, max_depth=depth, min_samples_leaf=leaf_samples)
+            
+
+            print('min_samples_leaf: ' + str(leaf_samples) + ', max_depth: ' + str(depth) + ', score: ' + str(score) + ', overfit score: ' + str(overfitScore))
+            leafResults.append(score)
+            overfitLeafResults.append(overfitScore)
+
+        results.append(leafResults)
+        overfitResults.append(overfitLeafResults)
+
+    return min_samples_leaf_values, max_depth, results, overfitResults
+
+def saveDf(name):
+    df.to_excel('C:\\Users\\username\\Downloads\\' + name)
+
