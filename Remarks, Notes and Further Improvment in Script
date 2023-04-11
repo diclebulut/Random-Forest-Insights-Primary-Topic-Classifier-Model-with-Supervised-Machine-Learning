@@ -1,0 +1,33 @@
+# random_state=1234 makes result reproducible
+##train, test = train_test_split(df, test_size=0.1, random_state=1)
+##
+##X_train = np.array(train['wordVec'].tolist())
+##X_test = np.array(test['wordVec'].tolist())
+##y_train = train['label']
+##y_test = test['label']
+##
+##print("Train/test split")
+##
+### random_state=1234 makes result reproducible
+##rf = RandomForestClassifier(random_state=1234)
+##rf_model = rf.fit(X_train, y_train.values)
+##
+##print("Random Forest model fit")
+##
+##print(rf.score(X_test, y_test))
+# 0.5982142857142857
+
+#print(cross_validate(df))
+
+#print(df.groupby('Primary Topic')['Primary Topic'].count() / len(df))
+
+#print(create_df())
+
+
+# Select single class vs probability split between classes
+# rf.predict(X_test)
+# rf.predict_proba(X_test)
+
+### Model training
+# varying min_samples_leaf_values or max_depth seemingly still only max 65%
+# TODO: Try filtering out rows with no words found before doing split
